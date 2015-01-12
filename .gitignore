@@ -1,0 +1,7 @@
+### Emacs ###
+# -*- mode: gitignore; -*-
+*~
+\#*\#
+
+### OSX ###
+.DS_Store

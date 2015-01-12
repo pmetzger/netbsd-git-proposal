@@ -1,0 +1,374 @@
+From: esr@snark.thyrsus.com (Eric S. Raymond)
+To: tech-repository@netbsd.org
+Subject: Reply to core statement on version control systems
+Message-Id: <20150105221057.D7888C00A3@snark.thyrsus.com>
+Date: Mon,  5 Jan 2015 17:10:57 -0500 (EST)
+
+[Repost at Alan Barrett's request, with one minor correction]
+
+I have been forwarded core's statement of direction on version
+control.  The following is a detailed reply and proposal grounded in
+my experience as the maintainer of cvs-fast-export and reposurgeon.
+Full original text is included for archival purposes.
+
+Executive summary:
+
+* Git and hg are the viable options; I can convert to either, with 
+  slightly more accident risk for hg because its import tools are
+  less well tested.
+
+* Most steps in the technical process are independent of the choice
+  between git and hg; thus it is not strictly necessary to finalize
+  that choice going in.
+
+* Whichever of the two you choose, there are plugins which support 
+  live access via the other.
+
+* Git has mature support for access via CVS clients; hg does not.
+
+* I am confident that performance will not be a serious issue with
+  either system. Git has a small advantage on low-memory systems
+  due to being written in C rather than a language with GC.
+
+* I recommend in favor of a big-bang cutover with CVS gateway
+  enabled immediately, and *against* trying to incrementally propagate CVS 
+  commits to a target DVCS during an extended fade-over. CVS has some
+  misfeatures that would make such a fade-over risky, and there are
+  better ways to mitigate the problems of the big-bang approach.
+
+* Duplicate logically-distinct vendor branch labels pose a technical
+  issue that is ugly but solvable.
+
+* It *will* be possible to graft SCCS history to the conversion.
+
+> The NetBSD core group has been asked to make a statement on 
+> version control systems.
+> 
+> There is a strong case for switching from CVS to a modern 
+> distributed version control system (DVCS).  However, the 
+> proponents of particular DVCS systems have not presented a 
+> coherent plan that can be used to implement a transition from the 
+> current system to a new system.
+
+In this reply I shall propose most of such a plan.
+
+Background information:
+
+I maintain cvs-fast-export, which converts CVS repositories to
+git-fast-import streams.
+
+I maintain reposurgeon, a powerful tool for repository conversion and surgery
+which is essentially a structure editor for git-fast-import streams.
+
+I maintain sccs2rcs, which can lift SCCS files to RCS and thus make a
+collection of the them fit input to cvs-fast-export.
+
+I have been specifically targeting NetBSD src as a test of these tools
+for many months, because it's the biggest and ugliest pile of CVS I know 
+of anywhere.
+
+I have built a computer colorfully known as the Great Beast of Malvern 
+with processor and RAM/cache characteristics specifically tuned for
+speeding up complex repository surgery, with the explicit aim of hunting
+down and converting large CVS repositories.  
+
+(The regulars on my blog donated no less than $2790 to the "Help Stamp
+Out CVS In Your Lifetime" fund so the Great Beast could be built.  I
+told them NetBSD was target #1.  If you listen hard enough you can
+probably hear them cheering...)
+
+> In the opinion of the core group, the NetBSD project should switch 
+> from CVS to a DVCS system as soon as a suitable transition plan is 
+> presented and approved.
+
+I believe I can have the technical prerequisites in place as soon as
+your approval process allows the conversion to proceed.
+
+> Some of the things that we would like to be addressed in a 
+> transition plan are:
+> 
+>  * How well the proposed system satisfies the requirements and
+>    desires of the community, in terms of features, ease of use,
+>    performance, and other considerations that have been mentioned
+>    in the tech-repository mailing list.  It would be useful to
+>    have a matrix similar to the one produced by FreeBSD, available
+>    at <https://wiki.freebsd.org/VersionControl>.
+
+I have examined the FreeBSD matrix.  I can tell you some things
+that I believe will simplify your decision tree.
+
+First: It is a matter of fact that the bzr and SVK systems are
+moribund.  Cogito has not been maintained since 2006; today's
+option is "bare" git.
+
+Second: while I respect what the Subversion team has done (and have
+been a minor contributor to that code myself) Subversion performance
+is so agonizingly slow on repositories the size of yours that this
+problem is in itself a showstopper. And that's before we get to the
+fact that SVN is not a DVCS and lacks the replication/merge capabilities
+of more modern VCSes.
+
+Third: Monotone, while a very interesting system in concept, has IMO
+failed to achieve the degree of user and developer buy-in required to
+sustain itself as a project.  This failure is less a reflection of
+Monotone's intrinsic merits or faults than of the brute fact that git
+and hg have sucked all of the oxygen out of the space Monotone aimed
+to occupy.  There is thus no realistic prospect that Monotone will
+achieve all the capabilities NetBSD requires (such as, for example, CVS
+gatewaying).
+
+Fourth: I know there has been some interest in Fossil (not listed in the
+FreeBSD matrix) in the NetBSD community. It, too is, an interesting design
+with significant good points.  Unfortunately, it is not designed to scale
+up to anywhere near NetBSD's size of project and I believe Fossil's author
+would himself recommend against deployment here.
+
+Only git and hg approximate the combination of performance and features
+which I understand the NetBSD project to require.
+
+I can do a full conversion to either target with relative ease.  My tools would
+go through a git-fast-export stream as an intermediate representation.  
+Because this is the case, you need not commit to a final choice between the
+two until a late stage of the cutover.
+
+(The choice is not completely symmetrical. We are slightly more likely to hit
+unexpected  glitches converting to hg, as their import tools are less well
+tested than git's.)
+
+>  * Performance implications of the desired VCS system, especially
+>    for hosts with low or moderate amounts of memory.
+
+With certainty, neither git nor hg performance will pose any
+noticeable performance issues on recent desktop or server hardware
+with RAM of 4GB or up.  I know this through having experimented with
+the src repository myself and by reports from cvs-fast-export devs.
+ 
+>    Whether low performance hosts:
+> 
+>      - will be able to use the new system fully; or
+>      - will be able to use a degraded mode that will allow at
+>        least HEAD and branch checkouts and commits (but perhaps
+>        without the ability to create new branches or to merge); or
+>      - will be able to use a front-end or mirror that provides
+>        CVS-like capabilities and performance; or
+>      - will not be able to use revision control at all.
+> 
+>    Note that a checkout of the NetBSD "src" tree has nearly 150000
+>    files in more than 15000 subdirectories (not including "CVS"
+>    subdirectories, or obsolete files or directories), and the
+>    "src" CVS repository has more than 300000 files in more than
+>    38000 directories (including "Attic" subdirectories).  Almost
+>    all existing DVCS systems exhibit performance problems on a
+>    tree of this size, unless the host has ample memory.
+
+I cannot answer the questions with certainty for "low-memory" systems,
+because I don't know how constrained your minimum build platform is.  I
+can say the following:
+
+1. I have never heard serious performance complaints from users of
+   either git or hg, even on very large repositories and relatively
+   weak hardware.
+
+2. Git collects a slight edge here through being written in a fixed-extent
+   language (C) rather than one with GC (Python).
+
+3. For raw performance on common operations, and pretty much regardless
+   of RAM size, there is *nothing* faster than git.  It is the best you
+   are going to do by that measure. 
+
+>  * Whether it will be possible to run the existing CVS system
+>    in parallel with the new version control system during a
+>    transition period, and if so, how commits made to one system
+>    will be mirrored to the other.
+
+It could be tried - cvs-fast-export has an incremental-dump option
+that could be pressed into service - but in the absence of commitids
+(which older sections of the repository will not have), CVS lacks the
+coherence and monotonicity properties required to incrementally mirror
+to a changeset-based VCS safely.
+
+The attempt could work fine, or it could fail in some gnarly but
+unobvious way that would leave damage in the converted history. I do
+not recommend attempting this.
+
+(CVS is unfortunately special in this regard.  SVN has good coherence
+and monotonicity; a fadeover strategy from SVN would make sense.)
+
+When I did the Emacs conversion, what I did instead of a fadeover was
+publish a series of trial conversions for review while the old bzr
+repo was still in use. Core team members were encouraged to audit the
+trial conversions for glitches.
+
+Eventually we scheduled a day for full cutover of the live repo and just
+did it.  For this project I would also set up a CVS gateway to the
+converted repo (if git is the target).
+
+While such a cutover may sound a bit daunting my experience is that
+those generally go quite smoothly if the trial conversions have een
+properly audited beforehand.
+
+>  * Whether one-way or bidirectional near-real-time conversion to
+>    other VCS systems will be possible on an ongoing basis, and
+>    if so, to which systems (other than the system chosen as the
+>    master), and how it will be configured.
+
+Whether you elect hg or git, it should be relatively easy to support 
+both git and hg clients.
+
+CVS is a different matter. Git's support for access via a CVS client
+is pretty mature and well documented. Hg either does not have this
+capability or it is so poorly documented that I can't find it.
+
+>  * A matrix of all the supporting tools and code that currently
+>    assumes CVS, with plans and actions for the conversion of each
+>    item to the new VCS.
+
+I can't do this part, because I don't know your codebase well enough.
+ 
+>  * How the NetBSD project's official servers should be set up,
+>    taking into account the needs of developers with write access,
+>    read-only access for the public to mirror the repository,
+>    read-only access for the public to check out the tree (if
+>    that is different from mirroring the repository), backups,
+>    redundancy, audit trail, email for commit messages, and any
+>    other issues identified with the assistance of NetBSD admins.
+>
+>  * How tools will be incorporated into the src tree, or
+>    bootstrapped from pkgsrc. 
+>
+>  * How developers and non-developers will interact with the
+>    system, including workflow options for official release or
+>    feature branches, and for personal public or private branches
+>    (by both developers with write access, and non-developers).
+
+These procedural issues are outside my competence.  See my remarks below 
+on "Mr. Inside".
+ 
+>  * New standards for log messages that refer to earlier commits,
+>    to avoid tying us to any particular VCS in the future.
+>    (Roughly, what to say in log messages instead of "revision
+>    <number>" or "commit <hash>" or "the previous commit".)
+
+I use a format I call an "action stamp" that looks like this:
+
+2011-10-25T15:11:09Z!fred@foonly.com
+
+While this is not absolutely guaranteed unique it is close enough in
+practice.
+ 
+>  * How the existing repository will be converted.  The following
+>    items would be nice to have (in decreasing order of importance):
+> 
+>      - how CVS vendor branches will be handled, including
+>        cases where the same vendor tag has been used for
+>        logically-distinct branches (as is common in pkgsrc).
+
+I'm going to need more technical detail on this, and a pointer to
+examples; it sounds ugly.  In the worst case I may need to write 
+a custom pre-conversion step to hack the CVS branch labels.
+
+>      - how (if at all) historical log messages will be edited
+>        during the conversion (for example, to adjust the
+>        character set, to convert user names to email addresses,
+>        or to fix up references to CVS numeric revision numbers,
+>        to make them use the newly defined standards);
+
+My normal practice is to do all three of these fixups.  I adjust the
+character set to UTF-8.  I lift CVS revision numbers to an action
+stamp identifying the derived changeset.  Fullname/email pairs need to
+be compiled from the project's records (usually by mining mailing list
+archives) before the final conversion.
+
+One additional fixup I normally do is to remove expanded CVS keyword
+values from the masters.  These are only supposed to be generated into
+workfiles on checkout, but there are various forms of mischief with the
+underlying RCS commands that can result in them getting wedged into masters
+where they shouldn't be.
+ 
+>      - how (if at all) historical repository moves and copies
+>        will be identified and fixed up during the conversion;
+
+This is a non-issue under git, which does no container tracking and
+does not represent moves and copies internally.  (Instead it deduces this
+informatiom when needed.)
+
+hg *does* container-track.  Should you elect it as a final target,
+rename and move operations can be automatically deduced at the
+last stage.
+
+>      - whether pre-CVS history (such as the older SCCS history)
+>        can also be included, either at the time of conversion, or
+>        later;
+
+That will be messy, but I have the tools to handle grafting SCCS 
+history onto the final conversion.
+
+>      - whether information removed as a result of the USL v. BSDI
+>        lawsuit could ever be reinstated, if legal issues were
+>        resolved in the future.
+
+It could. My reposurgeon tool is good for this sort of thing.
+
+>  * Considerations to avoid lock-in to a particular version
+>    control system, but to allow for a future change to yet
+>    another system.  (For example, we could choose a VCS system
+>    with a widely supported import and export format, and restrict
+>    our workflow to features that are supported by many VCS
+>    systems, and avoid the use of features that are unique to the
+>    chosen system; however, the set of widely-supported features
+>    should be identified.)
+
+The set of widely-supported features is easy: it's what will fit in
+a git-fast-import stream.  The only real compromise this may entail is
+giving up on container-tracking if future importers are not capable of 
+deducing these operations.
+
+>  * An estimated time-line of the conversion, together with a list
+>    of people responsible for it and their respective tasks.
+> 
+> -- Alan Barrett, on behalf or the NetBSD core group
+
+My time estimate is approximately two man-months.
+
+Roles:
+
+The conversion expert, Mr. Outside, would be me.  I will take responsibility 
+for all technical issues related to the history conversion, as outlined above.
+
+We will also require a "Mr. Inside". That person should be a member
+of the core team with policy authority over the conversion. Mr. Inside's
+reponsibilities will include
+
+* Collecting full names and email addresses of committers so we can do
+  name mapping properly.
+
+* Identifying CVS dependencies in the source tree.
+
+* Writing the part of the plan that deals with post-conversion
+  administrative issues - hosting, access control, redundancy, email hooks,
+  tool bootstrapping, workflow, private branches.
+
+* Communicating the core team's requirements and decisions to Mr. Outside.
+
+* Arranging the server access Mr. Outside will require to build and
+  publish conversions.
+
+* Signing off on the quality of the conversion.
+
+* Choosing the cutover day.
+
+While I'm not attempting to volunteer him, I will note that Alan
+Barrett and I collaborated well on some of the early exploratory work
+leading up to this.  If he's willing to take on the Mr. Inside job I
+would be quite in favor of that.
+
+Potential trouble spots:
+
+In a conversion on a CVS repository this large and this old, the
+probability that we will trip over some nasty and heretofore unknown
+repository malformation(s) approaches unity. I'll probably need to do some
+sort of significant development work on cvs-fast-export, which is the
+main reason the time estimate is so long.
+-- 
+		<a href="http://www.catb.org/~esr/">Eric S. Raymond</a>
+
